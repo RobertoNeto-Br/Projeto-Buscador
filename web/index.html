@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Buscador — Mini-SAD & Monitor de Preços</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+
+  <div class="container">
+    <!-- Topbar -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-icon">🔎</div>
+        <div>
+          <h1>Buscador — Mini-SAD de Preços</h1>
+          <div class="status-row">
+            <span id="statusDot" class="status-dot offline"></span>
+            <span id="statusText">Conectando ao bot...</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button id="btnRefresh" class="btn btn-primary" title="Puxa os dados mais recentes do bot">
+          <span class="btn-icon">🔄</span>
+          <span>Atualizar</span>
+        </button>
+        <button id="btnScrapeAll" class="btn btn-accent" title="Força o bot a coletar o preço de todos os links agora">
+          <span class="btn-icon">⚡</span>
+          <span>Varrer agora</span>
+        </button>
+        <button id="btnGlobalSchedule" class="btn btn-ghost" title="Configurar frequência global de varredura">
+          <span class="btn-icon">⏱️</span>
+          <span>Agendar</span>
+        </button>
+        <button id="btnCsv" class="btn btn-ghost" title="Baixar histórico em CSV">
+          <span class="btn-icon">📥</span>
+          <span>CSV</span>
+        </button>
+        <button id="btnSettings" class="btn btn-icon-only" title="Configurar conexão com a API do bot">
+          ⚙️
+        </button>
+      </div>
+    </header>
+
+    <!-- Banner de aviso se desconectado -->
+    <div id="connectionBanner" class="banner hidden">
+      <div>
+        <strong>API do bot não alcançada.</strong>
+        <span id="connectionBannerMsg">
+          Se este site estiver na Vercel, clique em ⚙️ e informe a URL pública da API do bot.
+        </span>
+      </div>
+      <button id="btnBannerConfig" class="btn btn-small btn-primary">Configurar API</button>
+    </div>
+
+    <!-- KPIs -->
+    <section class="kpi-grid">
+      <div class="kpi-card">
+        <span class="kpi-label">Links monitorados</span>
+        <strong id="kpiLinks" class="kpi-value">0 / 5</strong>
+        <span class="kpi-sub">Qualquer loja • Buscapé/Zoom importam 40 dias</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Base histórica</span>
+        <strong id="kpiReadings" class="kpi-value">0 coletas</strong>
+        <span id="kpiDaysBadge" class="kpi-sub">0 dias distintos</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Varredura global</span>
+        <strong id="kpiSchedule" class="kpi-value">—</strong>
+        <span class="kpi-sub">Editável via site ou /agendar</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Última sincronização</span>
+        <strong id="kpiSync" class="kpi-value kpi-value-sm">—</strong>
+        <span id="kpiBotName" class="kpi-sub">Discord Bot</span>
+      </div>
+    </section>
+
+    <!-- Formulário para adicionar link direto pelo site -->
+    <section class="card add-card">
+      <div class="section-header">
+        <div>
+          <h2>Adicionar novo produto</h2>
+          <p>Cole o link de qualquer loja (links do Buscapé ou Zoom já trazem até 40 dias reais de histórico automático!).</p>
+        </div>
+        <span id="slotsPill" class="pill">0/5 vagas</span>
+      </div>
+
+      <form id="addForm" class="add-form">
+        <input
+          type="url"
+          id="inputUrl"
+          placeholder="https://www.buscape.com.br/... ou qualquer outra loja"
+          required
+        />
+        <input
+          type="text"
+          id="inputAlias"
+          placeholder="Apelido opcional (ex: SSD Kingston 1TB)"
+          maxlength="120"
+        />
+        <button type="submit" id="btnAddSubmit" class="btn btn-primary">
+          <span>➕ Adicionar</span>
+        </button>
+      </form>
+    </section>
+
+    <!-- Workspace principal: Produtos + Gráfico com Filtro de Data -->
+    <main class="main-grid">
+      <!-- Lista de Produtos -->
+      <section class="products-panel">
+        <div class="section-header">
+          <h2>Produtos acompanhados</h2>
+          <span class="muted-text">Clique em um card para analisar</span>
+        </div>
+        <div id="productsList" class="products-list">
+          <div class="empty-state">Carregando produtos...</div>
+        </div>
+      </section>
+
+      <!-- Gráfico & Histórico -->
+      <section class="card detail-panel">
+        <div class="section-header">
+          <div>
+            <h2 id="detailTitle">Evolução de preços</h2>
+            <p id="detailSubtitle">Selecione um produto para ver o gráfico e as coletas.</p>
+          </div>
+          <a id="detailLink" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-small btn-ghost hidden">
+            Abrir loja ↗
+          </a>
+        </div>
+
+        <!-- Barra de Filtro de Data ("a partir de uma data até hoje" ou "desde a adição") -->
+        <div class="date-filter-bar">
+          <div class="date-input-group">
+            <label for="filterStartDate">A partir de:</label>
+            <input type="date" id="filterStartDate" />
+            <span class="muted-text">até hoje</span>
+          </div>
+          <div class="date-presets">
+            <button type="button" id="btnDateSinceAdded" class="btn btn-small btn-ghost">Desde a adição</button>
+            <button type="button" id="btnDate5Days" class="btn btn-small btn-ghost">Últimos 5 dias</button>
+            <button type="button" id="btnDateAll" class="btn btn-small btn-primary">Todo o histórico</button>
+          </div>
+        </div>
+
+        <div id="detailStats" class="detail-stats hidden">
+          <div class="mini-stat">
+            <span>Atual</span>
+            <strong id="statCurrent">—</strong>
+          </div>
+          <div class="mini-stat">
+            <span>Menor</span>
+            <strong id="statMin" class="text-green">—</strong>
+          </div>
+          <div class="mini-stat">
+            <span>Maior</span>
+            <strong id="statMax" class="text-orange">—</strong>
+          </div>
+          <div class="mini-stat">
+            <span>Média</span>
+            <strong id="statAvg">—</strong>
+          </div>
+        </div>
+
+        <div class="chart-wrap">
+          <canvas id="priceChart"></canvas>
+          <div id="chartEmpty" class="chart-empty">
+            Adicione um produto ou clique em um item para visualizar a curva de preços.
+          </div>
+        </div>
+
+        <div class="history-wrap">
+          <div class="section-header" style="margin-bottom: 8px;">
+            <h3>Histórico de coletas</h3>
+            <span id="historyPeriodBadge" class="badge">Todo o histórico</span>
+          </div>
+          <div class="table-scroll">
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>Data / Hora</th>
+                  <th>Preço</th>
+                  <th>Método</th>
+                </tr>
+              </thead>
+              <tbody id="historyBody">
+                <tr>
+                  <td colspan="3" class="muted-cell">Nenhuma coleta selecionada.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Seção Mini-SAD (Sistema de Apoio à Decisão) -->
+    <section class="card sad-section">
+      <div class="section-header">
+        <div>
+          <h2>🧠 Mini-SAD — Sistema de Apoio à Decisão</h2>
+          <p>
+            Modelo multicritério: desconto vs média (45%), proximidade da mínima histórica (35%) e tendência por regressão linear (20%).
+          </p>
+        </div>
+        <span id="sadPeriodTag" class="pill">Análise ativa</span>
+      </div>
+
+      <div class="sad-grid">
+        <!-- Diagnóstico do Produto Selecionado -->
+        <div class="sad-box">
+          <div class="sad-hero">
+            <div>
+              <span class="kpi-label">Recomendação para o item selecionado</span>
+              <div id="sadDecisionBadge" class="decision-badge neutral">SEM DADOS</div>
+            </div>
+            <div class="score-box">
+              <span class="kpi-label">Score de Oportunidade</span>
+              <strong id="sadScoreText" class="score-number">0 / 100</strong>
+              <div class="score-bar-track">
+                <div id="sadScoreFill" class="score-bar-fill" style="width: 0%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <p id="sadJustification" class="sad-justification">
+            Selecione um produto monitorado para visualizar a recomendação de compra e a justificativa estatística.
+          </p>
+
+          <div class="sad-metrics">
+            <div class="mini-stat">
+              <span>Tendência</span>
+              <strong id="sadTrend">—</strong>
+            </div>
+            <div class="mini-stat">
+              <span>Desvio Padrão</span>
+              <strong id="sadStdDev">—</strong>
+            </div>
+            <div class="mini-stat">
+              <span>Posição na Faixa</span>
+              <strong id="sadPosition">—</strong>
+            </div>
+            <div class="mini-stat">
+              <span>Dias Distintos</span>
+              <strong id="sadDays">—</strong>
+            </div>
+          </div>
+
+          <!-- Simulador What-If (Análise de Sensibilidade) -->
+          <div class="whatif-box">
+            <div class="whatif-header">
+              <strong>🎯 Simulação What-If (Preço-Alvo)</strong>
+              <span class="muted-text">Teste quanto o produto precisa variar para bater sua meta</span>
+            </div>
+            <form id="whatIfForm" class="whatif-form">
+              <input
+                type="number"
+                id="inputTargetPrice"
+                step="0.01"
+                min="0.01"
+                placeholder="Ex: 350.00"
+              />
+              <button type="submit" class="btn btn-small btn-primary">Simular meta</button>
+            </form>
+            <div id="whatIfResult" class="whatif-result hidden"></div>
+          </div>
+        </div>
+
+        <!-- Ranking Comparativo Multicritério -->
+        <div class="sad-box">
+          <div class="section-header" style="margin-bottom: 10px;">
+            <div>
+              <h3>🏆 Ranking de Melhor Oportunidade</h3>
+              <p class="muted-text">Comparação automática entre todos os produtos monitorados</p>
+            </div>
+          </div>
+          <div id="sadRankingList" class="ranking-list">
+            <div class="muted-text">Nenhum produto para ranquear ainda.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Modal de Agendamento -->
+  <div id="scheduleModal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="scheduleModalTitle">Agendar varredura</h3>
+        <button class="modal-close" data-close="scheduleModal">✕</button>
+      </div>
+      <form id="scheduleForm" class="modal-body">
+        <input type="hidden" id="schedScope" value="global" />
+        <input type="hidden" id="schedProductId" value="" />
+        <p id="scheduleModalDesc" class="muted-text"></p>
+
+        <div class="form-row">
+          <label>
+            Intervalo
+            <input type="number" id="schedValue" min="1" value="6" required />
+          </label>
+          <label>
+            Unidade
+            <select id="schedUnit">
+              <option value="minutos">Minutos (mín. 5)</option>
+              <option value="horas" selected>Horas</option>
+              <option value="dias">Dias</option>
+              <option value="semanas">Semanas</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" id="btnResetToGlobal" class="btn btn-ghost hidden">
+            Voltar ao Global
+          </button>
+          <button type="submit" class="btn btn-primary">Salvar agendamento</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal de Configuração da Conexão (Supabase Nuvem ou API Local) -->
+  <div id="settingsModal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Conexão com o Bot</h3>
+        <button class="modal-close" data-close="settingsModal">✕</button>
+      </div>
+      <form id="settingsForm" class="modal-body">
+        <p class="muted-text">
+          <strong>Modo Nuvem (Vercel + Discloud Gold):</strong> preencha URL e Anon Key do Supabase.<br />
+          <strong>Modo Local:</strong> deixe o Supabase vazio e use <code>http://localhost:8080</code>.
+        </p>
+
+        <label>
+          Supabase URL (recomendado para Vercel + Discloud)
+          <input type="url" id="cfgSupabaseUrl" placeholder="https://seu-projeto.supabase.co" />
+        </label>
+
+        <label>
+          Supabase Anon Key
+          <input type="password" id="cfgSupabaseKey" placeholder="eyJhbGciOi..." />
+        </label>
+
+        <label>
+          URL da API Local (opcional, se não usar Supabase)
+          <input type="url" id="cfgApiUrl" placeholder="http://localhost:8080" />
+        </label>
+
+        <label>
+          Chave da API Local (opcional)
+          <input type="password" id="cfgApiKey" placeholder="Opcional" />
+        </label>
+
+        <div class="modal-footer">
+          <button type="button" id="btnResetApi" class="btn btn-ghost">Limpar</button>
+          <button type="submit" class="btn btn-primary">Salvar & Conectar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

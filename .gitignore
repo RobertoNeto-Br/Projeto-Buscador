@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+**/.env
+data/
+*.db
+*.zip
+dados_coletados.csv
+Discloud_Buscador/
+Entrega_MiniSAD_Buscador/
